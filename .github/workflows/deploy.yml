@@ -1,0 +1,77 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+  # специальное событие, которое происходит при ручном вызове workflow
+  workflow_dispatch:
+
+jobs:
+  # помним, что прежде всего, надо собрать фронтенд при помощи webpack
+  build:
+    runs-on: ubuntu-latest
+    # укажем, что для этой job нам нужен специальный контейнет
+    container:
+      # возьмем Docker образ Node.js из публичного реестра
+      image: node:14.17.0-alpine
+    # последовательные задачи (шаги), важно помнить, что переменные окружения не сохраняются
+    # между шагами и их нужно пробрасывать, если требуется.
+    steps:
+      # указываем action, который будет запущен как часть job
+      # В текущем случае это клонирование репозитория
+      - uses: actions/checkout@v2
+      # Кеширование npm
+      - name: Cache dependencies
+        # включаем специальный action
+        uses: actions/cache@v2
+        # передаем параметры
+        with:
+          # что кешировать (путь)
+          path: ~/.npm
+          # ключ кеширования (хеш)
+          key: npm-${{ hashFiles('package-lock.json') }}
+          # ключ для восстановления кеша
+          restore-keys: npm-
+      # Запуск сборки
+      - name: Build
+        run: npm run build
+        env:
+          REACT_APP_BACKEND_URL: ${{ secrets.API_URL }}
+      # Теперь загружаем артефакты
+      - name: Archive build
+        uses: actions/upload-artifact@v2
+        with:
+          name: build
+          path: build
+  deploy:
+    # укажем, что для деплоя нам нужно сначала собрать приложение
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # загружаем ранее сохраненные артефакты
+      - name: Download a single artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: build
+      # Дальше по аналогии с backend, просто загружаем на сервер
+      - name: Setup SSH
+        run: |
+          # создаем директорию для ключа
+          mkdir -p ~/.ssh
+          # выводим содержимое нашей переменной окружения в файл
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          # ставим нужные безопасные права
+          chmod 700 ~/.ssh
+          chmod 600 ~/.ssh/id_rsa
+          # Добавляем отпечаток сервера
+          echo "$SSH_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      - name: Copy files to the server
+        # заливаем файлы при помощи rsync
+        run: |
+          # воспользуемся SCP здесь, т.к. нам просто нужно загрузить из
+          # одной директории
+          scp build/* deploy@172.104.151.230:~/realworld/public/
