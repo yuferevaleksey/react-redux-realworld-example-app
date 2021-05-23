@@ -25,7 +25,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          REACT_APP_BACKEND_URL: http://${{ github.event.inputs.refName }}.${{ secrets.API_URL }}
+          REACT_APP_BACKEND_URL: http://${{ github.event.inputs.dst }}.${{ secrets.API_URL }}
       - name: Archive build
         uses: actions/upload-artifact@v2
         with:
@@ -49,8 +49,8 @@ jobs:
         run: ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
       - name: Copy build to the server
         run: |
-          ssh $SSH_USER@$SSH_HOST "mkdir -p ~/app/${{ github.event.inputs.refName }}/public"
-          rsync -ravz build/* $SSH_USER@$SSH_HOST:~/app/${{ github.event.inputs.refName }}/public/
+          ssh $SSH_USER@$SSH_HOST "mkdir -p ~/app/${{ github.event.inputs.dst }}/public"
+          rsync -ravz build/* $SSH_USER@$SSH_HOST:~/app/${{ github.event.inputs.dst }}/public/
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
