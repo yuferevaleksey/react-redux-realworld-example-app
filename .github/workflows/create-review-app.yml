@@ -50,6 +50,6 @@ jobs:
         uses: mshick/add-pr-comment@v1
         with:
           message: Created new review app at ${{ env.REVIEW_APP_URL }}
-          repo_token: ${{ github.GITHUB_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
         env:
           REVIEW_APP_URL: http://${{ github.head_ref }}-${{ secrets.APP_HOST }}/
