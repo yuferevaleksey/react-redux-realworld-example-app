@@ -16,7 +16,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          REACT_APP_BACKEND_URL: http://${{ github.head_ref }}-${{ secrets.API_URL }}
+          REACT_APP_BACKEND_URL: http://${{ github.head_ref }}.${{ secrets.API_URL }}
       - name: Archive build
         uses: actions/upload-artifact@v2
         with:
@@ -50,6 +50,6 @@ jobs:
         uses: mshick/add-pr-comment@v1
         with:
           message: Created new review app at ${{ env.REVIEW_APP_URL }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
         env:
-          REVIEW_APP_URL: http://${{ github.head_ref }}-${{ secrets.APP_HOST }}/
+          REVIEW_APP_URL: http://${{ github.head_ref }}.${{ secrets.APP_HOST }}/
