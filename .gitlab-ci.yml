@@ -47,7 +47,7 @@ deploy:
     - .setup_ssh
   stage: deploy
   variables:
-    DEPLOY_DST: '/home/deploy/app/$CI_COMMIT_REF_SLUG/current/public'
+    DEPLOY_DST: '/home/deploy/app/$CI_COMMIT_REF_SLUG/current/public/'
   script:
     - ssh $SSH_USER@$SSH_HOST "mkdir -p $DEPLOY_DST"
     - scp build/* $SSH_USER@$SSH_HOST:$DEPLOY_DST
