@@ -90,10 +90,11 @@ create_review_app:
   tags:
     - remote
   stage: review
+  extends:
+    - .docker
   variables:
     GIT_STRATEGY: none
   script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
     - mkdir -p ~/deploy/$CI_COMMIT_REF_SLUG
     - cp ~/docker-compose.yml ~/deploy/$CI_COMMIT_REF_SLUG/
