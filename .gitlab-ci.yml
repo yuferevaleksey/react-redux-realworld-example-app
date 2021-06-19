@@ -2,10 +2,11 @@
 stages:
   - test
   - build
+  - push
   - deploy
   - review
 
-default:
+.node:
   image: node:14.17.0-alpine
   cache:
     key:
@@ -15,6 +16,13 @@ default:
       - .npm/
   before_script:
     - npm ci --cache .npm --prefer-offline
+
+.docker:
+  image: docker:20
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
 
 .setup_ssh:
   before_script:
@@ -33,24 +41,51 @@ lint:
 
 build:
   stage: build
-  variables:
-    REACT_APP_BACKEND_URL: http://$CI_COMMIT_REF_SLUG.$APP_HOST/api
+  extends:
+    - .docker
   script:
-    - npm run build
-  artifacts:
-    paths:
-      - build
-    expire_in: 1 week
+    - docker pull $CI_REGISTRY_IMAGE:latest || true
+    - >
+      docker build
+      --pull
+      --cache-from $CI_REGISTRY_IMAGE:latest
+      --build-arg BACKEND_URL="http://$CI_COMMIT_REF_SLUG.$APP_HOST/api"
+      --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+      --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+      .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+
+push_latest:
+  stage: push
+  extends:
+    - .docker
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE:latest
+    - docker push $CI_REGISTRY_IMAGE:latest
+  only:
+    - main
 
 deploy:
-  extends:
-    - .setup_ssh
+  tags:
+    - remote
   stage: deploy
   variables:
-    DEPLOY_DST: '/home/deploy/app/$CI_COMMIT_REF_SLUG/current/public/'
+    GIT_STRATEGY: none
   script:
-    - ssh $SSH_USER@$SSH_HOST "mkdir -p $DEPLOY_DST"
-    - scp build/* $SSH_USER@$SSH_HOST:$DEPLOY_DST
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    - mkdir -p ~/deploy/$CI_COMMIT_REF_SLUG
+    - cp ~/docker-compose.yml ~/deploy/$CI_COMMIT_REF_SLUG/
+    - docker stack deploy $CI_COMMIT_REF_SLUG -c /home/gitlab-runner/deploy/$CI_COMMIT_REF_SLUG/docker-compose.yml --with-registry-auth
+  environment:
+    name: production
+    url: http://$CI_COMMIT_REF_SLUG.$APP_HOST/
+  rules:
+    - if: $CI_COMMIT_BRANCH == 'main'
 
 start_review:
   stage: review
