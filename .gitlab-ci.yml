@@ -24,15 +24,6 @@ stages:
   before_script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
 
-.setup_ssh:
-  before_script:
-    - 'which ssh-agent || (apk add --update openssh curl bash git)'
-    - eval $(ssh-agent -s)
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
-    - mkdir -p ~/.ssh
-    - chmod 700 ~/.ssh
-    - echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-
 lint:
   extends:
     - .node
@@ -95,19 +86,18 @@ deploy:
   rules:
     - if: $CI_COMMIT_BRANCH == 'main'
 
-start_review:
+create_review_app:
+  tags:
+    - remote
   stage: review
-  extends:
-    - .setup_ssh
   variables:
-    BRANCH_EXISTS_URL: 'https://gitlab.com/api/v4/projects/$BACKEND_PROJECT_ID/repository/branches/$CI_COMMIT_REF_NAME'
-    CREATE_BRANCH_URL: 'https://gitlab.com/api/v4/projects/$BACKEND_PROJECT_ID/repository/branches?branch=$CI_COMMIT_REF_NAME&ref=$CI_DEFAULT_BRANCH'
-    TRIGGER_PIPELINE_URL: 'https://gitlab.com/api/v4/projects/$BACKEND_PROJECT_ID/pipeline?ref=$CI_COMMIT_REF_NAME'
+    GIT_STRATEGY: none
   script:
-    - 'status_code=$(curl -I --header "PRIVATE-TOKEN: $PAT_TOKEN" --write-out "%{http_code}" --silent --output /dev/null "$BRANCH_EXISTS_URL")'
-    - '[[ "$status_code" -ne 204 ]] && status_code=$(curl -X POST --header "PRIVATE-TOKEN: $PAT_TOKEN" --write-out "%{http_code}" --silent --output /dev/null "$CREATE_BRANCH_URL")'
-    - '[[ "$status_code" -ne 400 ]] && echo "Branch already exists" && exit 0'
-    - 'curl -X POST --header "PRIVATE-TOKEN: $PAT_TOKEN" --write-out "%{http_code}" --silent --output /dev/null "$TRIGGER_PIPELINE_URL"'
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    - mkdir -p ~/deploy/$CI_COMMIT_REF_SLUG
+    - cp ~/docker-compose.yml ~/deploy/$CI_COMMIT_REF_SLUG/
+    - docker stack deploy $CI_COMMIT_REF_SLUG -c /home/gitlab-runner/deploy/$CI_COMMIT_REF_SLUG/docker-compose.yml --with-registry-auth
   environment:
     name: review/$CI_COMMIT_REF_NAME
     url: http://$CI_COMMIT_REF_SLUG.$APP_HOST/
@@ -118,17 +108,18 @@ start_review:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
 stop_review:
+  tags:
+    - remote
   stage: review
-  extends:
-    - .setup_ssh
+  variables:
+    GIT_STRATEGY: none
   environment:
     name: review/$CI_COMMIT_REF_NAME
     action: stop
-  variables:
-    DEPLOY_DST: '/home/deploy/app/$CI_COMMIT_REF_SLUG/public/current'
   script:
-    - |
-      ssh $SSH_USER@$SSH_HOST "rm -rf $DEPLOY_DST"
+    - docker stack rm $CI_COMMIT_REF_SLUG
+    - docker rmi $CI_REGISTRY:$CI_COMMIT_REF_SLUG
+    - rm -rf ~/deploy/$CI_COMMIT_REF_SLUG
   rules:
     - if: '$CI_MERGE_REQUEST_TITLE =~ /SKIP REVIEW/'
       when: never
