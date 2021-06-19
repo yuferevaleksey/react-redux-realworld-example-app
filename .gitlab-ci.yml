@@ -34,6 +34,8 @@ stages:
     - echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
 lint:
+  extends:
+    - .node
   stage: test
   script:
     - npm run lint
