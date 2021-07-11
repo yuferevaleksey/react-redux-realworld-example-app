@@ -1,6 +1,7 @@
 ---
 stages:
   - test
+  - pre-build
   - build
   - push
   - deploy
@@ -27,6 +28,11 @@ stages:
 .docker_auth:
   before_script:
     - docker login -u $CI_DEPLOY_USER -p $CI_DEPLOY_PASSWORD $CI_REGISTRY
+
+create_branch:
+  stage: pre-build
+  script:
+    - if [ -z ${REMOTE_REF+x} ]; then git checkout -b $REMOTE_REF; fi
 
 lint:
   extends:
