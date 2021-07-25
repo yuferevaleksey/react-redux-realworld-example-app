@@ -59,6 +59,7 @@ build:
   rules:
     - if: $CI_COMMIT_BRANCH == 'main'
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
 
 push_latest:
   stage: push
@@ -115,6 +116,7 @@ create_review_app:
     - kubectl rollout status -f deployment.yml
     - 'status_code=$(curl -I --header "PRIVATE-TOKEN: $PAT_TOKEN" --write-out "%{http_code}" --silent --output /dev/null "$BRANCH_EXISTS_URL")'
     - '[[ "$status_code" -ne 204 ]] && status_code=$(curl -X POST --header "PRIVATE-TOKEN: $PAT_TOKEN" --write-out "%{http_code}" --silent --output /dev/null "$CREATE_BRANCH_URL")'
+    - '[[ "$status_code" -ne 400 ]] && echo "Branch already exists" && exit 0'
   environment:
     name: review/$CI_COMMIT_REF_NAME
     url: http://$CI_COMMIT_REF_SLUG.$APP_HOST/
@@ -125,6 +127,7 @@ create_review_app:
     - if: '$CI_MERGE_REQUEST_TITLE =~ /SKIP REVIEW/'
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
 
 create_review_backend_app:
   stage: post-review
@@ -137,6 +140,7 @@ create_review_backend_app:
     - if: '$CI_MERGE_REQUEST_TITLE =~ /SKIP REVIEW/'
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
 
 stop_review:
   stage: review
@@ -153,4 +157,6 @@ stop_review:
     - if: '$CI_MERGE_REQUEST_TITLE =~ /SKIP REVIEW/'
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
       when: manual
