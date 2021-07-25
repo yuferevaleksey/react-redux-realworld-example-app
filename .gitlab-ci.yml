@@ -84,10 +84,17 @@ deploy:
     - sed -i "s~__CI_REGISTRY_IMAGE__~${CI_REGISTRY_IMAGE}~" deployment.yml
     - sed -i "s/__CI_ENVIRONMENT_SLUG__/${CI_ENVIRONMENT_SLUG}/" deployment.yml ingress.yml service.yml
     - sed -i "s/__VERSION__/${CI_COMMIT_REF_SLUG}/" deployment.yml
-    - kubectl apply -f deployment.yml
+    - |
+      if kubectl apply -f deployment.yml | grep -q unchanged; then
+          echo "=> Patching deployment to force image update."
+          kubectl patch -f deployment.yml -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"ci-last-updated\":\"$(date +'%s')\"}}}}}"
+      else
+          echo "=> Deployment apply has changed the object, no need to force image update."
+      fi
     - kubectl apply -f service.yml || true
     - kubectl apply -f ingress.yml
     - kubectl rollout status -f deployment.yml
+    - kubectl get deploy,svc,ing,pod -l app="$(echo ${CI_PROJECT_NAME} | tr "." "-")",ref="${CI_ENVIRONMENT_SLUG}"
   environment:
     name: production
     url: http://$CI_COMMIT_REF_SLUG.$APP_HOST/
@@ -110,10 +117,17 @@ create_review_app:
     - sed -i "s~__CI_REGISTRY_IMAGE__~${CI_REGISTRY_IMAGE}~" deployment.yml
     - sed -i "s/__CI_ENVIRONMENT_SLUG__/${CI_ENVIRONMENT_SLUG}/" deployment.yml ingress.yml service.yml
     - sed -i "s/__VERSION__/${CI_COMMIT_REF_SLUG}/" deployment.yml
-    - kubectl apply -f deployment.yml
+    - |
+      if kubectl apply -f deployment.yml | grep -q unchanged; then
+          echo "=> Patching deployment to force image update."
+          kubectl patch -f deployment.yml -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"ci-last-updated\":\"$(date +'%s')\"}}}}}"
+      else
+          echo "=> Deployment apply has changed the object, no need to force image update."
+      fi
     - kubectl apply -f service.yml || true
     - kubectl apply -f ingress.yml
     - kubectl rollout status -f deployment.yml
+    - kubectl get deploy,svc,ing,pod -l app="$(echo ${CI_PROJECT_NAME} | tr "." "-")",ref="${CI_ENVIRONMENT_SLUG}"
     - 'status_code=$(curl -I --header "PRIVATE-TOKEN: $PAT_TOKEN" --write-out "%{http_code}" --silent --output /dev/null "$BRANCH_EXISTS_URL")'
     - '[[ "$status_code" -ne 204 ]] && status_code=$(curl -X POST --header "PRIVATE-TOKEN: $PAT_TOKEN" --write-out "%{http_code}" --silent --output /dev/null "$CREATE_BRANCH_URL")'
     - '[[ "$status_code" -ne 400 ]] && echo "Branch already exists" && exit 0'
