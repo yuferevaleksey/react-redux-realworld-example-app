@@ -1,7 +1,6 @@
 ---
 stages:
   - test
-  - pre-build
   - build
   - push
   - deploy
@@ -28,11 +27,6 @@ stages:
 .docker_auth:
   before_script:
     - docker login -u $CI_DEPLOY_USER -p $CI_DEPLOY_PASSWORD $CI_REGISTRY
-
-create_branch:
-  stage: pre-build
-  script:
-    - if [ -z ${REMOTE_REF+x} ]; then git checkout -b $REMOTE_REF; fi
 
 lint:
   extends:
@@ -79,21 +73,24 @@ push_latest:
     - main
 
 deploy:
-  extends:
-    - .docker_auth
-  tags:
-    - remote
   stage: deploy
-  variables:
-    GIT_STRATEGY: none
+  image:
+    name: lachlanevenson/k8s-kubectl:v1.21.1
+    entrypoint: ["/bin/sh", "-c"]
   script:
-    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
-    - mkdir -p ~/deploy/$CI_COMMIT_REF_SLUG
-    - cp ~/docker-compose.yml ~/deploy/$CI_COMMIT_REF_SLUG/
-    - docker stack deploy $CI_COMMIT_REF_SLUG -c /home/gitlab-runner/deploy/$CI_COMMIT_REF_SLUG/docker-compose.yml --with-registry-auth
+    - cd k8s/
+    - sed -i "s~__CI_REGISTRY_IMAGE__~${CI_REGISTRY_IMAGE}~" deployment.yml
+    - sed -i "s/__CI_ENVIRONMENT_SLUG__/${CI_ENVIRONMENT_SLUG}/" deployment.yml ingress.yml service.yml
+    - sed -i "s/__VERSION__/${CI_COMMIT_REF_SLUG}/" deployment.yml
+    - kubectl apply -f deployment.yml
+    - kubectl apply -f service.yml || true
+    - kubectl apply -f ingress.yml
+    - kubectl rollout status -f deployment.yml
   environment:
     name: production
     url: http://$CI_COMMIT_REF_SLUG.$APP_HOST/
+    kubernetes:
+      namespace: ci-cd-workshop
   rules:
     - if: $CI_COMMIT_BRANCH == 'main'
 
@@ -103,8 +100,6 @@ create_review_app:
   tags:
     - remote
   stage: review
-  extends:
-    - .docker
   variables:
     GIT_STRATEGY: none
   script:
