@@ -154,7 +154,6 @@ create_review_backend_app:
     - if: '$CI_MERGE_REQUEST_TITLE =~ /SKIP REVIEW/'
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_PIPELINE_SOURCE == "pipeline"
 
 stop_review:
   stage: review
