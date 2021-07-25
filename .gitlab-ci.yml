@@ -118,6 +118,8 @@ create_review_app:
     name: review/$CI_COMMIT_REF_NAME
     url: http://$CI_COMMIT_REF_SLUG.$APP_HOST/
     on_stop: stop_review
+    kubernetes:
+      namespace: ci-cd-workshop
   rules:
     - if: '$CI_MERGE_REQUEST_TITLE =~ /SKIP REVIEW/'
       when: never
