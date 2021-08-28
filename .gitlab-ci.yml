@@ -112,28 +112,28 @@ deploy:
 create_review_app:
   stage: review
   image:
-    name: lachlanevenson/k8s-kubectl:v1.21.1
+    name: alpine/helm:3.5.3
     entrypoint: ["/bin/sh", "-c"]
   variables:
     BRANCH_EXISTS_URL: 'https://gitlab.com/api/v4/projects/$BACKEND_PROJECT_ID/repository/branches/$CI_COMMIT_REF_NAME'
     CREATE_BRANCH_URL: 'https://gitlab.com/api/v4/projects/$BACKEND_PROJECT_ID/repository/branches?branch=$CI_COMMIT_REF_NAME&ref=$CI_DEFAULT_BRANCH'
   script:
     - apk add --update curl
-    - cd k8s/
-    - sed -i "s~__CI_REGISTRY_IMAGE__~${CI_REGISTRY_IMAGE}~" deployment.yml
-    - sed -i "s/__CI_ENVIRONMENT_SLUG__/${CI_ENVIRONMENT_SLUG}/" deployment.yml ingress.yml service.yml
-    - sed -i "s/__VERSION__/${CI_COMMIT_REF_SLUG}/" deployment.yml
     - |
-      if kubectl apply -f deployment.yml | grep -q unchanged; then
-          echo "=> Patching deployment to force image update."
-          kubectl patch -f deployment.yml -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"ci-last-updated\":\"$(date +'%s')\"}}}}}"
-      else
-          echo "=> Deployment apply has changed the object, no need to force image update."
-      fi
-    - kubectl apply -f service.yml || true
-    - kubectl apply -f ingress.yml
-    - kubectl rollout status -f deployment.yml
-    - kubectl get deploy,svc,ing,pod -l app="$(echo ${CI_PROJECT_NAME} | tr "." "-")",ref="${CI_ENVIRONMENT_SLUG}"
+      helm repo add --username gitlab-ci-token \
+        --password $CI_JOB_TOKEN \
+        ci-cd-workshop \
+        ${CI_API_V4_URL}/projects/28190076/packages/helm/stable
+      helm repo update
+      helm upgrade \
+        --install \
+        --set node.image.tag="$CI_COMMIT_REF_NAME" \
+        --set web.image.tag="$CI_COMMIT_REF_NAME" \
+        --set ciVars.domain="$DOMAIN" \
+        --set ciVars.CI_ENVIRONMENT_SLUG="$CI_ENVIRONMENT_SLUG" \
+        --set ciVars.CI_PROJECT_PATH_SLUG="$CI_PROJECT_PATH_SLUG" \
+        $CI_COMMIT_REF_NAME \
+        ci-cd-workshop/app
     - 'status_code=$(curl -I --header "PRIVATE-TOKEN: $PAT_TOKEN" --write-out "%{http_code}" --silent --output /dev/null "$BRANCH_EXISTS_URL")'
     - '[[ "$status_code" -ne 204 ]] && status_code=$(curl -X POST --header "PRIVATE-TOKEN: $PAT_TOKEN" --write-out "%{http_code}" --silent --output /dev/null "$CREATE_BRANCH_URL")'
     - '[[ "$status_code" -ne 400 ]] && echo "Branch already exists" && exit 0'
@@ -142,7 +142,7 @@ create_review_app:
     url: http://$CI_COMMIT_REF_SLUG.$APP_HOST/
     on_stop: stop_review
     kubernetes:
-      namespace: ci-cd-workshop
+      namespace: "$KUBE_NAMESPACE"
   rules:
     - if: '$CI_MERGE_REQUEST_TITLE =~ /SKIP REVIEW/'
       when: never
@@ -164,14 +164,13 @@ create_review_backend_app:
 stop_review:
   stage: review
   image:
-    name: lachlanevenson/k8s-kubectl:v1.21.1
+    name: alpine/helm:3.5.3
     entrypoint: ["/bin/sh", "-c"]
   environment:
     name: review/$CI_COMMIT_REF_NAME
     action: stop
   script:
-    - kubectl delete ing -l ref=${CI_ENVIRONMENT_SLUG}
-    - kubectl delete all -l ref=${CI_ENVIRONMENT_SLUG}
+    - helm uninstall $CI_COMMIT_REF_NAME
   rules:
     - if: '$CI_MERGE_REQUEST_TITLE =~ /SKIP REVIEW/'
       when: never
