@@ -7,6 +7,12 @@ stages:
   - review
   - post-review
 
+variables:
+  REVIEW_BASE_DOMAIN: "192-46-238-237.nip.io"
+  DOMAIN: "192-46-238-237.nip.io"
+  LIVE_DOMAIN: "production-192-46-238-237.nip.io"
+  KUBE_NAMESPACE: ci-cd-workshop
+
 .node:
   image: node:14.17.0-alpine
   cache:
@@ -77,29 +83,29 @@ push_latest:
 deploy:
   stage: deploy
   image:
-    name: lachlanevenson/k8s-kubectl:v1.21.1
+    name: alpine/helm:3.5.3
     entrypoint: ["/bin/sh", "-c"]
   script:
-    - cd k8s/
-    - sed -i "s~__CI_REGISTRY_IMAGE__~${CI_REGISTRY_IMAGE}~" deployment.yml
-    - sed -i "s/__CI_ENVIRONMENT_SLUG__/${CI_ENVIRONMENT_SLUG}/" deployment.yml ingress.yml service.yml
-    - sed -i "s/__VERSION__/${CI_COMMIT_REF_SLUG}/" deployment.yml
     - |
-      if kubectl apply -f deployment.yml | grep -q unchanged; then
-          echo "=> Patching deployment to force image update."
-          kubectl patch -f deployment.yml -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"ci-last-updated\":\"$(date +'%s')\"}}}}}"
-      else
-          echo "=> Deployment apply has changed the object, no need to force image update."
-      fi
-    - kubectl apply -f service.yml || true
-    - kubectl apply -f ingress.yml
-    - kubectl rollout status -f deployment.yml
-    - kubectl get deploy,svc,ing,pod -l app="$(echo ${CI_PROJECT_NAME} | tr "." "-")",ref="${CI_ENVIRONMENT_SLUG}"
+      helm repo add --username gitlab-ci-token \
+        --password $CI_JOB_TOKEN \
+        ci-cd-workshop \
+        ${CI_API_V4_URL}/projects/28190076/packages/helm/stable
+      helm repo update
+      helm upgrade \
+        --install \
+        --set node.image.tag="$CI_COMMIT_REF_NAME" \
+        --set web.image.tag="$CI_COMMIT_REF_NAME" \
+        --set ciVars.domain="$DOMAIN" \
+        --set ciVars.CI_ENVIRONMENT_SLUG="$CI_ENVIRONMENT_SLUG" \
+        --set ciVars.CI_PROJECT_PATH_SLUG="$CI_PROJECT_PATH_SLUG" \
+        production \
+        ci-cd-workshop/app
   environment:
     name: production
-    url: http://$CI_COMMIT_REF_SLUG.$APP_HOST/
+    url: http://$LIVE_DOMAIN/
     kubernetes:
-      namespace: ci-cd-workshop
+      namespace: "$KUBE_NAMESPACE"
   rules:
     - if: $CI_COMMIT_BRANCH == 'main'
 
