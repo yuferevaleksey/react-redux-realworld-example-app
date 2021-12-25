@@ -35,6 +35,7 @@ build:
     expire_in: 1 week
 
 deploy:
+  image: ubuntu:latest
   stage: deploy
   script:
     - apt -qq update && apt upgrade -qqy openssh-client scp
