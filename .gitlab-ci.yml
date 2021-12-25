@@ -12,39 +12,26 @@ cache:
   paths:
     - .npm/
 
-.default-cache: &default-cache
-  before_script:
-    - npm ci --cache .npm --prefer-offline
+before_script:
+  - npm ci --cache .npm --prefer-offline
 
 eslint:
-  extends:
-    - .default-cache
   stage: lint
-  variables:
-    NODE_VERSION: 14.17.0
   script:
-    - npm i
     - npm run lint
 
 prettier:
-  extends:
-    - .default-cache
   stage: lint
-  variables:
-    NODE_VERSION: 14.17.0
   script:
-    - npm i
     - npm run check:format
 
 build:
-  extends:
-      - .default-cache
   stage: build
   script:
-   - npm run build
+    - npm run build
   artifacts:
     paths:
-     - build
+      - build
     expire_in: 1 week
 
 deploy:
