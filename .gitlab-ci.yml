@@ -37,7 +37,7 @@ build:
 deploy:
   stage: deploy
   script:
-    - apk --update add openssh-client scp
+    - apt -qq update && apt upgrade -qqy openssh-client scp
     - eval $(ssh-agent -s)
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
     - mkdir -p ~/.ssh
