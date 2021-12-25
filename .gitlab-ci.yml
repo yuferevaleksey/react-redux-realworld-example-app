@@ -3,6 +3,8 @@ stages:
   - build
   - deploy
 
+image: node:14.17.0-alpine
+
 cache:
   key:
     files:
@@ -17,7 +19,6 @@ cache:
 eslint:
   extends:
     - .default-cache
-  image: node:14.17.0-alpine
   stage: lint
   variables:
     NODE_VERSION: 14.17.0
@@ -28,7 +29,6 @@ eslint:
 prettier:
   extends:
     - .default-cache
-  image: node:14.17.0-alpine
   stage: lint
   variables:
     NODE_VERSION: 14.17.0
@@ -37,6 +37,8 @@ prettier:
     - npm run check:format
 
 build:
+  extends:
+      - .default-cache
   stage: build
   script:
    - npm run build
