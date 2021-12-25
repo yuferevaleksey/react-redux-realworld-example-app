@@ -1,5 +1,6 @@
 stages:
   - lint
+  - build
   - deploy
 
 cache:
@@ -35,19 +36,22 @@ prettier:
     - npm i
     - npm run check:format
 
+build:
+  stage: build
+  script:
+   - npm run build
+  artifacts:
+    paths:
+     - build
+    expire_in: 1 week
+
 deploy:
-  image: ubuntu:latest
   stage: deploy
   script:
-    - apt -qq update && apt upgrade -qqy openssh-client rsync
+    - apt update && apt upgrade -qqy openssh-client scp
     - eval $(ssh-agent -s)
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
     - mkdir -p ~/.ssh
     - chmod 700 ~/.ssh
     - echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-    - rsync -a --progress --human-readable --delete
-      --exclude-from '.gitignore'
-      --exclude .gitignore
-      --exclude .git
-      . deploy@165.227.160.94:~/realworld
-    - ssh deploy@165.227.160.94 "pushd ~/realworld && npm install  && pm2 restart ecosystem.config.js && popd"
+    - scp -r build/* deploy@165.227.160.94:~/realworld/public
