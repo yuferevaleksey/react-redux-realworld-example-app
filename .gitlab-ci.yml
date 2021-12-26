@@ -1,48 +1,180 @@
 ---
 stages:
-  - lint
+  - test
   - build
+  - push
   - deploy
+  - review
+  - post-review
 
-image: node:14.17.0-alpine
+variables:
+  REVIEW_BASE_DOMAIN: "192-46-238-237.nip.io"
+  DOMAIN: "192-46-238-237.nip.io"
+  LIVE_DOMAIN: "production-192-46-238-237.nip.io"
+  KUBE_NAMESPACE: ci-cd-workshop
 
-cache:
-  key:
-    files:
-      - package-lock.json
-  paths:
-    - .npm/
+.node:
+  image: node:14.17.0-alpine
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
+  before_script:
+    - npm ci --cache .npm --prefer-offline
 
-before_script:
-  - npm ci --cache .npm --prefer-offline
+.docker:
+  image: docker:20
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
 
-eslint:
-  stage: lint
+.docker_auth:
+  before_script:
+    - docker login -u $CI_DEPLOY_USER -p $CI_DEPLOY_PASSWORD $CI_REGISTRY
+
+lint:
+  extends:
+    - .node
+  stage: test
   script:
     - npm run lint
-
-prettier:
-  stage: lint
-  script:
     - npm run check:format
+  rules:
+    - if: $CI_COMMIT_BRANCH == 'main'
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
 build:
   stage: build
+  extends:
+    - .docker
   script:
-    - npm run build
-  artifacts:
-    paths:
-      - build
-    expire_in: 1 week
+    - docker pull $CI_REGISTRY_IMAGE:latest || true
+    - >
+      docker build
+      --pull
+      --cache-from $CI_REGISTRY_IMAGE:latest
+      --build-arg BACKEND_URL="http://$CI_COMMIT_REF_SLUG.$APP_HOST/api"
+      --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+      --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+      .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+  rules:
+    - if: $CI_COMMIT_BRANCH == 'main'
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
+
+push_latest:
+  stage: push
+  extends:
+    - .docker
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE:latest
+    - docker push $CI_REGISTRY_IMAGE:latest
+  only:
+    - main
 
 deploy:
   stage: deploy
+  image:
+    name: alpine/helm:3.5.3
+    entrypoint: ["/bin/sh", "-c"]
   script:
-    - apk --update add openssh-client
-    - eval $(ssh-agent -s)
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
-    - mkdir -p ~/.ssh
-    - chmod 700 ~/.ssh
-    - echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-    - scp -r build/* $SSH_USER@$SSH_HOST:~/realworld/public
+    - |
+      helm repo add --username gitlab-ci-token \
+        --password $CI_JOB_TOKEN \
+        ci-cd-workshop \
+        ${CI_API_V4_URL}/projects/28190076/packages/helm/stable
+      helm repo update
+      helm upgrade \
+        --install \
+        --set node.image.tag="$CI_COMMIT_REF_NAME" \
+        --set web.image.tag="$CI_COMMIT_REF_NAME" \
+        --set ciVars.domain="$DOMAIN" \
+        --set ciVars.CI_ENVIRONMENT_SLUG="$CI_ENVIRONMENT_SLUG" \
+        --set ciVars.CI_PROJECT_PATH_SLUG="$CI_PROJECT_PATH_SLUG" \
+        production \
+        ci-cd-workshop/app
+  environment:
+    name: production
+    url: http://$LIVE_DOMAIN/
+    kubernetes:
+      namespace: "$KUBE_NAMESPACE"
+  rules:
+    - if: $CI_COMMIT_BRANCH == 'main'
 
+create_review_app:
+  stage: review
+  image:
+    name: alpine/helm:3.5.3
+    entrypoint: ["/bin/sh", "-c"]
+  variables:
+    BRANCH_EXISTS_URL: 'https://gitlab.com/api/v4/projects/$BACKEND_PROJECT_ID/repository/branches/$CI_COMMIT_REF_NAME'
+    CREATE_BRANCH_URL: 'https://gitlab.com/api/v4/projects/$BACKEND_PROJECT_ID/repository/branches?branch=$CI_COMMIT_REF_NAME&ref=$CI_DEFAULT_BRANCH'
+  script:
+    - apk add --update curl
+    - |
+      helm repo add --username gitlab-ci-token \
+        --password $CI_JOB_TOKEN \
+        ci-cd-workshop \
+        ${CI_API_V4_URL}/projects/28190076/packages/helm/stable
+      helm repo update
+      helm upgrade \
+        --install \
+        --set node.image.tag="$CI_COMMIT_REF_NAME" \
+        --set web.image.tag="$CI_COMMIT_REF_NAME" \
+        --set ciVars.domain="$DOMAIN" \
+        --set ciVars.CI_ENVIRONMENT_SLUG="$CI_ENVIRONMENT_SLUG" \
+        --set ciVars.CI_PROJECT_PATH_SLUG="$CI_PROJECT_PATH_SLUG" \
+        $CI_COMMIT_REF_NAME \
+        ci-cd-workshop/app
+    - 'status_code=$(curl -I --header "PRIVATE-TOKEN: $PAT_TOKEN" --write-out "%{http_code}" --silent --output /dev/null "$BRANCH_EXISTS_URL")'
+    - '[[ "$status_code" -ne 204 ]] && status_code=$(curl -X POST --header "PRIVATE-TOKEN: $PAT_TOKEN" --write-out "%{http_code}" --silent --output /dev/null "$CREATE_BRANCH_URL")'
+    - '[[ "$status_code" -ne 400 ]] && echo "Branch already exists" && exit 0'
+  environment:
+    name: review/$CI_COMMIT_REF_NAME
+    url: http://$CI_COMMIT_REF_SLUG.$APP_HOST/
+    on_stop: stop_review
+    kubernetes:
+      namespace: "$KUBE_NAMESPACE"
+  rules:
+    - if: '$CI_MERGE_REQUEST_TITLE =~ /SKIP REVIEW/'
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
+
+create_review_backend_app:
+  stage: post-review
+  needs: ["create_review_app"]
+  trigger:
+    project: "ci-cd-workshop1/express-bookshelf-realworld-example-app"
+    branch: $CI_COMMIT_REF_NAME
+    strategy: depend
+  rules:
+    - if: '$CI_MERGE_REQUEST_TITLE =~ /SKIP REVIEW/'
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+stop_review:
+  stage: review
+  image:
+    name: alpine/helm:3.5.3
+    entrypoint: ["/bin/sh", "-c"]
+  environment:
+    name: review/$CI_COMMIT_REF_NAME
+    action: stop
+  script:
+    - helm uninstall $CI_COMMIT_REF_NAME
+  rules:
+    - if: '$CI_MERGE_REQUEST_TITLE =~ /SKIP REVIEW/'
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
+      when: manual

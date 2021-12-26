@@ -5,3 +5,4 @@ README.md
 .eslintrc.js
 .gitlab-ci.yml
 .github/
+k8s/
