@@ -17,7 +17,7 @@ cache:
 eslint:
   extends:
     - .default-cache
-  
+  image: node:14.17.0-alpine
   stage: lint
   variables:
     NODE_VERSION: 14.17.0
